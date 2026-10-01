@@ -66,9 +66,18 @@ private const val SHIM_ASSET = "shim/shell.js"
 /** 兼容层脚本调用的导出桥名字（与 shell.js 里的 window.RezeSave 对应）。 */
 private const val SAVE_BRIDGE = "RezeSave"
 
-/** 「关于手机版」弹窗里的两个外链，一律交给系统浏览器打开。 */
+/** 「关于手机版」弹窗里的外链，一律交给系统浏览器打开。 */
 private const val SITE_URL = "https://reze.design"
 private const val DESKTOP_URL = "https://github.com/BesingBG/reze-design-desktop/releases"
+
+/**
+ * 本壳自己的仓库与发布页。
+ *
+ * 「检查更新」就是打开发布页：壳不联网做版本比对，靠弹窗里已经写明的版本号 +
+ * 构建号让用户自己核。真做联网检查要每次启动请求 GitHub API，与"简单套壳"的取向不合。
+ */
+private const val PROJECT_URL = "https://github.com/BesingBG/reze-design-android"
+private const val RELEASES_URL = "$PROJECT_URL/releases"
 
 /** 弹窗偏好：勾了「不再提示」即写入。 */
 private const val PREFS_NAME = "shell"
@@ -167,7 +176,11 @@ class MainActivity : Activity() {
         val restored = savedInstanceState?.let { webView.restoreState(it) }
         if (restored == null) {
             val target = if (hasBuiltSite()) APP_URL else PROBE_URL
-            Log.i(TAG, "加载 $target（WebView ${webViewPkg?.versionName ?: "未知"}）")
+            Log.i(
+                TAG,
+                "加载 $target（壳 ${BuildConfig.VERSION_NAME}·${BuildConfig.VERSION_CODE}" +
+                    " @${BuildConfig.UPSTREAM_COMMIT}，WebView ${webViewPkg?.versionName ?: "未知"}）",
+            )
             webView.loadUrl(target)
         } else {
             Log.i(TAG, "已从实例状态恢复 WebView（历史 ${restored.size} 项）")
@@ -274,16 +287,40 @@ class MainActivity : Activity() {
                 setLineSpacing(0f, 1.15f)
             },
         )
+        // 构建信息：versionName 跟上游保持一致、刻意不带壳修订号，所以拿到包的人
+        // 光看"版本"分不清这是哪一次构建 —— 构建号 / 上游 commit / 构建时间补上这一层。
+        content.addView(
+            TextView(this).apply {
+                text = getString(
+                    R.string.notice_version,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE,
+                    BuildConfig.UPSTREAM_VERSION,
+                    BuildConfig.UPSTREAM_COMMIT,
+                    BuildConfig.BUILD_DATE,
+                )
+                textSize = 12f
+                setTextColor(Color.GRAY)
+                setPadding(0, gap / 2, 0, 0)
+            },
+        )
+
         val dontShow = CheckBox(this).apply { text = getString(R.string.notice_dont_show) }
         content.addView(dontShow)
 
-        // 两个外链做成对话框内的整行按钮：点它们**不关**对话框，
-        // 用户可以把两个都点完再关闭。
+        // 外链做成对话框内的整行按钮：点它们**不关**对话框，
+        // 用户可以把几个都点完再关闭。
         content.addView(
             linkButton(R.string.notice_site, SITE_URL),
         )
         content.addView(
             linkButton(R.string.notice_desktop, DESKTOP_URL),
+        )
+        content.addView(
+            linkButton(R.string.notice_project, PROJECT_URL),
+        )
+        content.addView(
+            linkButton(R.string.notice_update, RELEASES_URL),
         )
 
         val dialog = AlertDialog.Builder(this)

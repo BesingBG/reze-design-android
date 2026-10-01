@@ -11,10 +11,17 @@ local.properties
 *.keystore
 *.jks
 
+# 发布签名（M6）：密钥与口令都是本机资产，丢了就无法覆盖升级已安装的包，
+# 必须单独备份；绝不入库。
+keystore.properties
+
 # 构建期产物（由 scripts/build-web.mjs 生成，不入库）
 .build/
 app/src/main/assets/web/*
 !app/src/main/assets/web/.gitkeep
+
+# 发布产物（由 scripts/build-release.mjs 生成；不用 build/ 是因为 ./gradlew clean 会把它删掉）
+dist/
 
 # IDE
 .idea/
