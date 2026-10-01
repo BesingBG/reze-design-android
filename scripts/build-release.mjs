@@ -8,7 +8,8 @@
  * 做的事情：
  *   1) scripts/build-web.mjs            生成上游静态产物到 app/src/main/assets/web/
  *   2) ./gradlew :app:assembleRelease   打签名 APK
- *   3) 拷到 dist/RezeDesign-Android-<versionName>-<versionCode>.apk
+ *   3) 拷到 dist/RezeDesign-Android-<versionName>-<versionCode>-<上游 commit>.apk
+ *      并写出 dist/build-info.json（给 CI 读的机器可读清单）
  *
  * 版本号**不在这里计算**：唯一来源是 app/build.gradle.kts（读上游 package.json），
  * 这里只是把它读回来用于命名，避免两处各算一遍、公式漂移。
@@ -18,7 +19,14 @@
 
 import { execFileSync, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -51,11 +59,11 @@ function readBuildInfo() {
     cwd: root,
     encoding: "utf8",
   }).trim()
-  const [versionName, versionCode] = out.split(/\s+/)
-  if (!versionName || !versionCode) {
+  const [versionName, versionCode, shellRevision] = out.split(/\s+/)
+  if (!versionName || !versionCode || !shellRevision) {
     throw new Error(`:app:printBuildInfo 输出无法解析：${JSON.stringify(out)}`)
   }
-  return { versionName, versionCode }
+  return { versionName, versionCode, shellRevision }
 }
 
 function upstreamCommit() {
@@ -113,19 +121,43 @@ async function main() {
     )
   }
 
-  const { versionName, versionCode } = readBuildInfo()
-  const apkName = `RezeDesign-Android-${versionName}-${versionCode}.apk`
+  const { versionName, versionCode, shellRevision } = readBuildInfo()
+  const commit = upstreamCommit()
+
+  // 文件名里带上上游 commit：versionName 与上游一致、不含壳修订号，
+  // 光看版本分不出"同一上游版本的哪一次构建"，而壳会在上游 commit 之间反复发版。
+  // （桌面版的产物名同样把 sha 缀在末尾。）
+  const apkName = `RezeDesign-Android-${versionName}-${versionCode}-${commit}.apk`
   const out = join(distDir, apkName)
   mkdirSync(distDir, { recursive: true })
   copyFileSync(signed, out)
 
+  const digest = sha256(out)
+  const size = statSync(out).size
+
+  // 给 CI 读的机器可读清单。CI 因此不必去解析文件名 ——
+  // 那种耦合很脆：命名规则一改，那边的正则就得跟着改，忘了就静默取错值。
+  const buildInfo = {
+    apkName,
+    versionName,
+    versionCode: Number(versionCode),
+    shellRevision: Number(shellRevision),
+    upstreamCommit: commit,
+    sizeBytes: size,
+    sha256: digest,
+  }
+  writeFileSync(
+    join(distDir, "build-info.json"),
+    `${JSON.stringify(buildInfo, null, 2)}\n`,
+  )
+
   console.log(`
 [3/3] 产物已就绪
   ${out}
-  版本    ${versionName}（构建号 ${versionCode}）
-  上游    ${upstreamCommit()}
-  大小    ${mb(statSync(out).size)} MB
-  SHA256  ${sha256(out)}
+  版本    ${versionName}（构建号 ${versionCode}，壳修订号 ${shellRevision}）
+  上游    ${commit}
+  大小    ${mb(size)} MB
+  SHA256  ${digest}
 
 把 APK 发给测试者即可。同一次发版请在 gradle.properties 里把 shellRevision 加一，
 否则 versionCode 不变、装不上新版。

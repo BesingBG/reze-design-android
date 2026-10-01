@@ -41,7 +41,7 @@ git clone --recurse-submodules <repo-url>
 cd reze-design-android
 
 node scripts/build-web.mjs                   # static-export the upstream frontend into app/src/main/assets/web/
-node scripts/build-release.mjs               # build-web + assembleRelease -> dist/RezeDesign-Android-<version>-<code>.apk
+node scripts/build-release.mjs               # build-web + assembleRelease -> dist/RezeDesign-Android-<version>-<code>-<upstream-commit>.apk
 node scripts/build-release.mjs --skip-web    # shell-only change: reuse the existing web assets
 ```
 
@@ -65,6 +65,8 @@ versionCode = major*1_000_000 + minor*10_000 + patch*100 + shellRevision
 ```
 
 `shellRevision` lives in `gradle.properties` and must be bumped for every shell release — without it the new APK cannot be installed over the previous one.
+
+The artifact is named `RezeDesign-Android-<versionName>-<versionCode>-<upstream-commit>.apk`: since `versionName` matches upstream and cannot distinguish build batches, both the **build number** and the **upstream commit** are appended, so the file name alone tells you which version this is and which upstream commit it came from (the desktop build puts the sha in the artifact name too). The same data is written to `dist/build-info.json` for CI to read.
 
 ## Cloud Build via GitHub Actions
 

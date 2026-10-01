@@ -129,38 +129,44 @@ jobs:
         id: version
         shell: bash
         run: |
-          APK=$(ls dist/*.apk | head -1)
-          BASE=$(basename "$APK" .apk)                 # RezeDesign-Android-1.0.1-1000101
-          VERSION=$(echo "$BASE" | sed -E 's/^RezeDesign-Android-(.+)-[0-9]+$/\1/')
-          CODE=$(echo "$BASE" | sed -E 's/^RezeDesign-Android-.+-([0-9]+)$/\1/')
-          # 壳修订号直接读 gradle.properties —— 与 build.gradle.kts 读的是同一个值，
-          # 不在这里按 versionCode 反推公式（两个地方各算一遍迟早会漂移）。
-          SHELL_REV=$(sed -n 's/^shellRevision=\([0-9]\{1,\}\).*/\1/p' gradle.properties | tail -1)
-          SHA=$(git -C reze-design rev-parse --short HEAD)
-
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VERSION}-${SHELL_REV}" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### $BASE"
-            echo
-            echo "| 项 | 值 |"
-            echo "|---|---|"
-            echo "| 上游版本 | v${VERSION} |"
-            echo "| 上游 commit | \`${SHA}\` |"
-            echo "| 构建号 | ${CODE} |"
-            echo "| 壳修订号 | ${SHELL_REV} |"
-            echo "| 大小 | $(du -h "$APK" | cut -f1) |"
-            echo "| SHA256 | \`$(shasum -a 256 "$APK" | cut -d' ' -f1)\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          # 全部取自 build-release.mjs 写出的 dist/build-info.json。
+          # 不在这里解析文件名、也不 grep gradle.properties —— 单一来源，命名规则改了这边不用动。
+          node -e '
+          const fs = require("fs");
+          const i = require("./dist/build-info.json");
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            [
+              `apk=${i.apkName}`,
+              `version=${i.versionName}`,
+              `sha=${i.upstreamCommit}`,
+              `tag=v${i.versionName}-${i.shellRevision}`,
+              "",
+            ].join("\n"),
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              `### ${i.apkName}`,
+              "",
+              "| 项 | 值 |",
+              "|---|---|",
+              `| 上游版本 | v${i.versionName} |`,
+              `| 上游 commit | \`${i.upstreamCommit}\` |`,
+              `| 构建号 | ${i.versionCode} |`,
+              `| 壳修订号 | ${i.shellRevision} |`,
+              `| 大小 | ${(i.sizeBytes / 1024 / 1024).toFixed(2)} MB |`,
+              `| SHA256 | \`${i.sha256}\` |`,
+              "",
+            ].join("\n"),
+          );
+          '
 
       - name: 上传 Artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ steps.version.outputs.tag }}
-          path: dist/*.apk
+          path: dist/${{ steps.version.outputs.apk }}
           if-no-files-found: error
 
       - name: 生成 Release 说明
@@ -196,7 +202,7 @@ jobs:
         if: ${{ inputs.upload_release }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: dist/${{ steps.version.outputs.apk }}
           tag_name: ${{ steps.version.outputs.tag }}
           name: Reze Design Android ${{ steps.version.outputs.tag }}
           body_path: body.md

@@ -181,9 +181,12 @@ dependencies {
  *
  * 版本号只在本脚本里算一次，发布脚本读结果而不是自己重算一遍 ——
  * 免得两处公式漂移，出现"包名写的版本和 APK 里的版本不一致"。
+ *
+ * 壳修订号也一并输出：发布 tag 的 `-N` 后缀就是它，从与 Gradle 相同的来源出去，
+ * CI 就不必再去 grep gradle.properties、也不会跟这里的读取方式走岔。
  */
 tasks.register("printBuildInfo") {
     group = "build"
-    description = "打印 versionName / versionCode（供发布脚本命名产物）"
-    doLast { println("$appVersionName $appVersionCode") }
+    description = "打印 versionName / versionCode / shellRevision（供发布脚本与 CI 命名产物）"
+    doLast { println("$appVersionName $appVersionCode $shellRevision") }
 }

@@ -41,7 +41,7 @@ git clone --recurse-submodules <repo-url>
 cd reze-design-android
 
 node scripts/build-web.mjs                   # 把上游前端静态导出到 app/src/main/assets/web/
-node scripts/build-release.mjs               # build-web + assembleRelease -> dist/RezeDesign-Android-<版本>-<构建号>.apk
+node scripts/build-release.mjs               # build-web + assembleRelease -> dist/RezeDesign-Android-<版本>-<构建号>-<上游 commit>.apk
 node scripts/build-release.mjs --skip-web    # 只改壳时复用现有前端产物
 ```
 
@@ -65,6 +65,8 @@ versionCode = 主*1_000_000 + 次*10_000 + 修订*100 + 壳修订号
 ```
 
 壳修订号在 `gradle.properties` 的 `shellRevision`，**每次壳发版必须 +1** —— 不递增就装不上新版。
+
+产物名是 `RezeDesign-Android-<versionName>-<versionCode>-<上游 commit>.apk`：因为 `versionName` 与上游一致、分不出构建批次，所以把**构建号**和**上游 commit** 都缀在后面 —— 光看文件名就知道"这是哪一版、基于上游哪次提交"（桌面版同样把 sha 放进产物名）。同样的信息也写在 `dist/build-info.json` 里，供 CI 读取。
 
 ## 云端构建（GitHub Actions）
 
