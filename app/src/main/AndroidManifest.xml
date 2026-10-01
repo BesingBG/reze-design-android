@@ -13,10 +13,13 @@
         android:theme="@style/Theme.RezeDesignAndroid">
 
         <!--
-          configChanges：避免旋转/多任务切换导致 Activity 重建、页面重载，
-          编辑器的实时状态（模型、动作、相机）不能因为转屏而丢失。
+          configChanges：屏幕方向跟随系统（不锁定），用户转机即转屏。
+          但安卓默认会在旋转时销毁并重建 Activity，WebView 随之重建、页面重载，
+          编辑器里未保存的场景（模型、动作、相机）就没了 —— 所以必须在这里拦住，
+          让 WebView 自己重排而不是重建。
 
-          屏幕方向暂时不锁定，留到 M5 体验阶段再决定（见开发计划 §9 待决策项 6）。
+          壳不替用户做方向的策略决定：上游是响应式布局，横竖屏都能用，
+          也就省掉了额外的旋转按钮 UI。
         -->
         <activity
             android:name=".MainActivity"
