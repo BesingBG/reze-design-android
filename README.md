@@ -66,6 +66,38 @@ versionCode = major*1_000_000 + minor*10_000 + patch*100 + shellRevision
 
 `shellRevision` lives in `gradle.properties` and must be bumped for every shell release — without it the new APK cannot be installed over the previous one.
 
+## Cloud Build via GitHub Actions
+
+No local JDK / Android SDK? Build in the cloud: **Actions** → `Build APK` → **Run workflow**.
+
+Two inputs:
+
+- `upstream_ref`: empty = the upstream version this repo is adapted to; `latest-commit` = upstream default-branch HEAD (try a newer upstream without touching the submodule); `latest` = newest upstream tag; or a specific tag / commit SHA.
+- `upload_release`: checked by default — publishes a **Pre-release** to Releases (tag like `v1.0.1-1`, where `-1` is the shell revision; an existing tag is overwritten so you can fix the notes afterwards). Uncheck it to only produce Actions **Artifacts** (downloading those requires a GitHub login).
+
+A run does: upstream contract check → static export → signed APK → `apksigner` verification → artifact upload. The run summary shows version, build number, size and SHA256.
+
+First-time setup needs two Secrets (**Settings → Secrets and variables → Actions**); keys never enter the repo:
+
+```bash
+# KEYSTORE_BASE64 <- single-line base64 of reze-release.jks
+base64 -i reze-release.jks | tr -d '\n' | pbcopy
+
+# KEYSTORE_PROPERTIES <- full text of keystore.properties
+cat keystore.properties | pbcopy
+```
+
+Paste each into its Secret. With `gh` installed, one command each:
+
+```bash
+gh secret set KEYSTORE_BASE64 --repo BesingBG/reze-design-android < <(base64 -i reze-release.jks | tr -d '\n')
+gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore.properties
+```
+
+> ⚠️ `reze-release.jks` and its passwords **must be backed up together**: the keystore is the app's identity, and losing it means never being able to upgrade an installed copy in place.
+
+The pipeline is **manual-only** for now — it does not run on push or tag, and the scheduled "check upstream" pipeline is not built yet.
+
 ## Project structure
 
 ```
@@ -76,6 +108,7 @@ scripts/build-web.mjs      Upstream -> static export (the only place upstream is
 scripts/build-release.mjs  Signed APK pipeline
 scripts/check-contract.mjs Regression scan of the assumptions this shell makes about upstream
 reze-design/               Submodule (upstream reze-design, read-only)
+.github/workflows/         Manual-only build pipeline (build-apk.yml)
 ```
 
 ## License

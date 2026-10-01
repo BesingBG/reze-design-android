@@ -1,0 +1,205 @@
+name: Build APK
+
+# 手动触发（与桌面版的 build-installer.yml 对齐；「定时看上游更新」的那条流水线留到以后再加）。
+#
+# 一次运行 = 一条命令出包：契约检查 → 上游静态产物 → 签名 APK → 可选发 Pre-release。
+# 真正的构建逻辑都在 scripts/ 里，本地跑的是同一套，不在这里重写一遍。
+#
+# 前置（一次性）：在仓库 Settings → Secrets and variables → Actions 里配好
+#   KEYSTORE_BASE64       reze-release.jks 的 base64（单行）
+#   KEYSTORE_PROPERTIES   keystore.properties 的完整文本
+# 生成命令见 README 的「GitHub Actions」一节。
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "上游子模块版本：留空 = 仓库已适配的版本；latest-commit = 上游默认分支最新提交；latest = 最新 tag；也可填具体 tag / commit SHA"
+        type: string
+        default: ""
+      upload_release:
+        description: "构建完成后以 Pre-release 发布（tag 形如 v1.0.1-1；同名则覆盖）"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout（含上游 submodule）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          # 本仓库根目录没有 package.json —— 真正被 npm ci 的是 submodule 的 lockfile
+          # （scripts/build-web.mjs 在 .build/web-staging/ 副本里装依赖）。
+          # 不写这一行，setup-node 会因为找不到根目录 lockfile 而直接报错。
+          cache-dependency-path: reze-design/package-lock.json
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 与 app/build.gradle.kts 的 sourceCompatibility 17 对齐
+          java-version: "17"
+
+      - name: Setup Android SDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$(command -v sdkmanager)"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          # compileSdk 35 + buildToolsVersion 35.0.0 在 build.gradle.kts 里是钉死的
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Setup Gradle（依赖与构建缓存）
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 解析上游引用
+        if: ${{ inputs.upstream_ref != '' }}
+        shell: bash
+        # 输入经 env 中转，不直接内插进 run —— 官方推荐的注入防护写法
+        env:
+          REF: ${{ inputs.upstream_ref }}
+        run: |
+          git -C reze-design fetch --tags --force origin
+          if [ "$REF" = "latest" ]; then
+            LATEST_TAG=$(git -C reze-design ls-remote --tags origin \
+              | grep -oE 'refs/tags/v?[0-9][0-9.]*$' | sed 's#refs/tags/##' \
+              | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+            if [ -n "$LATEST_TAG" ]; then
+              echo "上游最新 tag：$LATEST_TAG"
+              git -C reze-design checkout "$LATEST_TAG"
+            else
+              git -C reze-design fetch --force origin HEAD
+              git -C reze-design checkout --detach FETCH_HEAD
+            fi
+          elif [ "$REF" = "latest-commit" ]; then
+            git -C reze-design fetch --force origin HEAD
+            git -C reze-design checkout --detach FETCH_HEAD
+          else
+            git -C reze-design checkout "$REF"
+          fi
+          echo "上游 submodule：$(git -C reze-design rev-parse --short HEAD)"
+
+      - name: 写入签名材料
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PROPERTIES: ${{ secrets.KEYSTORE_PROPERTIES }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PROPERTIES" ]; then
+            echo "::error::缺少 Secrets KEYSTORE_BASE64 / KEYSTORE_PROPERTIES，无法签出可发布的包。生成方式见 README「GitHub Actions」一节。"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > reze-release.jks
+          printf '%s\n' "$KEYSTORE_PROPERTIES" > keystore.properties
+          chmod 600 reze-release.jks keystore.properties
+
+      # 上游一旦改动被依赖的实现细节，这里是第一个断点：
+      # 比"打完包、装上手机、发现点导出没反应"要早得多，也便宜得多。
+      - name: 上游契约检查
+        run: node scripts/check-contract.mjs
+
+      - name: 生成上游静态产物
+        run: node scripts/build-web.mjs
+
+      - name: 打签名 APK
+        run: node scripts/build-release.mjs --skip-web
+
+      - name: 校验签名
+        run: |
+          APKSIGNER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner"
+          "$APKSIGNER" verify --print-certs -v dist/*.apk
+
+      - name: 读取版本信息
+        id: version
+        shell: bash
+        run: |
+          APK=$(ls dist/*.apk | head -1)
+          BASE=$(basename "$APK" .apk)                 # RezeDesign-Android-1.0.1-1000101
+          VERSION=$(echo "$BASE" | sed -E 's/^RezeDesign-Android-(.+)-[0-9]+$/\1/')
+          CODE=$(echo "$BASE" | sed -E 's/^RezeDesign-Android-.+-([0-9]+)$/\1/')
+          # 壳修订号直接读 gradle.properties —— 与 build.gradle.kts 读的是同一个值，
+          # 不在这里按 versionCode 反推公式（两个地方各算一遍迟早会漂移）。
+          SHELL_REV=$(sed -n 's/^shellRevision=\([0-9]\{1,\}\).*/\1/p' gradle.properties | tail -1)
+          SHA=$(git -C reze-design rev-parse --short HEAD)
+
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}-${SHELL_REV}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### $BASE"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 上游版本 | v${VERSION} |"
+            echo "| 上游 commit | \`${SHA}\` |"
+            echo "| 构建号 | ${CODE} |"
+            echo "| 壳修订号 | ${SHELL_REV} |"
+            echo "| 大小 | $(du -h "$APK" | cut -f1) |"
+            echo "| SHA256 | \`$(shasum -a 256 "$APK" | cut -d' ' -f1)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ steps.version.outputs.tag }}
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: 生成 Release 说明
+        if: ${{ inputs.upload_release }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          {
+            echo "基于上游 Web 版 reze-design v${VERSION} (\`${SHA}\`) 构建的离线安卓套壳。"
+            echo
+            echo "> **上游版本:** v${VERSION} (${SHA})"
+            echo
+            echo "## 安装前必读"
+            echo
+            echo "- 需要 **Android 12 及以上**，且系统 WebView **121 及以上**（WebGPU 的硬门槛，两条都要满足）。不满足时界面能打开，但模型渲染不出来。"
+            echo "- 侧载安装，没有应用商店。以前装过 debug 测试包的话**签名不同，必须先卸载**再装这个（编辑器里的场景会一起删掉，先导出备份）。"
+            echo
+            echo "如果当前版本较为落后，可以直接用网页版；或 Fork 本项目，在 Actions 里自行打包。"
+            echo
+            echo "---"
+            echo
+            echo "## ⭐ Star this project / 给个 Star 吧"
+            echo
+            echo "If you find this useful, please consider giving it a star! It helps others discover this project."
+            echo
+            echo "如果这个项目对你有帮助，欢迎点个 Star！你的支持是我持续更新的动力。"
+          } > body.md
+          echo "--- release body ---"
+          cat body.md
+
+      - name: 发布 Pre-release
+        if: ${{ inputs.upload_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Reze Design Android ${{ steps.version.outputs.tag }}
+          body_path: body.md
+          # Pre-release：方便发完再改文案 / 补文件（allowUpdates 让重跑覆盖同名 tag）
+          prerelease: true
+          allowUpdates: true

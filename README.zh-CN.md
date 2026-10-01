@@ -66,6 +66,38 @@ versionCode = 主*1_000_000 + 次*10_000 + 修订*100 + 壳修订号
 
 壳修订号在 `gradle.properties` 的 `shellRevision`，**每次壳发版必须 +1** —— 不递增就装不上新版。
 
+## 云端构建（GitHub Actions）
+
+不想在本地配 JDK / Android SDK？用 Actions 在云端出包：**Actions** → `Build APK` → **Run workflow**。
+
+两个输入：
+
+- `upstream_ref`：留空 = 打仓库已适配的上游版本；`latest-commit` = 上游默认分支最新提交（想先试试上游新版、又不想改 submodule 时用这个）；`latest` = 上游最新 tag；也可以填具体 tag / commit SHA；
+- `upload_release`：默认勾选 —— 构建完以 **Pre-release** 发布到 Releases（tag 形如 `v1.0.1-1`，`-1` 是壳修订号，同名时覆盖，方便发完再改文案）。取消勾选则只产出 Actions Artifacts（下载需要登录 GitHub）。
+
+一次运行依次做：上游契约检查 → 静态导出 → 签名 APK → `apksigner` 校验 → 上传 Artifact。运行页面 Summary 里有版本、构建号、大小与 SHA256，Release 页也会附上。
+
+首次使用要配两个 Secret（**Settings → Secrets and variables → Actions**），密钥不进仓库：
+
+```bash
+# KEYSTORE_BASE64 ← reze-release.jks 的单行 base64
+base64 -i reze-release.jks | tr -d '\n' | pbcopy
+
+# KEYSTORE_PROPERTIES ← keystore.properties 的完整文本
+cat keystore.properties | pbcopy
+```
+
+分别粘进两个 Secret 即可。装了 `gh` 的话一条命令：
+
+```bash
+gh secret set KEYSTORE_BASE64 --repo BesingBG/reze-design-android < <(base64 -i reze-release.jks | tr -d '\n')
+gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore.properties
+```
+
+> ⚠️ `reze-release.jks` 与里面的口令**必须一起备份**：keystore 决定 App 的身份，丢了就再也无法覆盖升级已安装的包。
+
+流水线目前**只有手动触发**，不响应 push 与 tag；「定时查上游更新」的自动流水线还没做。
+
 ## 目录结构
 
 ```
@@ -76,6 +108,7 @@ scripts/build-web.mjs      上游 -> 静态导出（唯一发生变换的地方�
 scripts/build-release.mjs  签名 APK 流水线
 scripts/check-contract.mjs 对"壳依赖的上游实现细节"做回归扫描
 reze-design/               git submodule（上游 reze-design，只读）
+.github/workflows/         手动触发的出包流水线（build-apk.yml）
 ```
 
 ## 许可
