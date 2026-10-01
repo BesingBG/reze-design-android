@@ -66,4 +66,5 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.webkit)
+    implementation(libs.androidx.core)
 }

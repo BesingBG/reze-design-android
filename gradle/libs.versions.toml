@@ -4,11 +4,18 @@
 agp = "8.7.3"
 kotlin = "2.2.10"
 androidxWebkit = "1.12.1"
+# androidx.webkit 传递进来的 core 是 1.1.0（2019 年），里面还没有
+# WindowCompat.setDecorFitsSystemWindows / WindowInsetsCompat.Type（都是 1.5.0 才加的），
+# 而 edge-to-edge 的 insets 处理正需要它们，所以显式抬到本机缓存里已有的版本。
+androidxCore = "1.13.0"
 
 [libraries]
 # WebViewCompat / WebViewAssetLoader / WebViewFeature 都来自这里，
 # 是本工程唯一的核心依赖（addDocumentStartJavaScript 注入兼容层时依赖它 >= 1.8.0）
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "androidxWebkit" }
+
+# ViewCompat / WindowCompat / WindowInsetsCompat，用于消费系统栏 insets
+androidx-core = { group = "androidx.core", name = "core", version.ref = "androidxCore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 取桌面版图标四角的均值（#264774 / #001633 / #27406a / #41b4e8），
+         仅供自适应图标的背景层兜底用。 -->
+    <color name="ic_launcher_background">#23547E</color>
+</resources>

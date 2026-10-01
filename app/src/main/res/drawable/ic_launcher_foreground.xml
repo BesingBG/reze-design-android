@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的前景层。
+
+  上游给的是一张满幅方图（reze-design-desktop/build/icon.png）。直接铺满 108dp 画布的话，
+  启动器遮罩只露出中间 72dp —— 相当于把画面放大 1.5 倍，脸被裁得很紧，和桌面版"头+肩"
+  的构图对不上。
+
+  这里把图缩到 66.667%（= 72/108），正好让它的边长等于可见区直径：圆形遮罩盖住的是图的
+  **内切区域**，只削掉四个角；圆角方形遮罩（Pixel 启动器）几乎整张都在。构图与桌面版一致，
+  也不会露出背景色。
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_art"
+    android:insetBottom="16.6667%"
+    android:insetLeft="16.6667%"
+    android:insetRight="16.6667%"
+    android:insetTop="16.6667%" />

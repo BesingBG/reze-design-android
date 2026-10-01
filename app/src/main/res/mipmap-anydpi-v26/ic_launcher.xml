@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      与桌面版同一张图（reze-design-desktop/build/icon.png，源自 icon-source.jpg），
+      放在 drawable/ic_launcher_foreground.xml 里做 66.667% 内缩（那里有为什么）。
+      背景色取了原图四个角的均值，只作兜底：正常情况下被前景盖住，看不见。
+    -->
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

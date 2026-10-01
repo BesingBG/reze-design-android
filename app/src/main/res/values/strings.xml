@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Reze Design</string>
+
+    <string name="notice_title">关于手机版</string>
+    <string name="notice_body">本应用是 Reze Design 的非官方安卓套壳，前端取自上游网页版静态打包，本地离线运行。\n\n已知局限：\n· 界面为桌面布局，手机屏幕窄，部分控件偏小，竖屏操作不便\n· 账号登录、发布、画廊、点赞等依赖云端的功能不可用\n· 渲染需要设备支持 WebGPU（约 Android 12+、系统 WebView 121+）\n\n需要完整的编辑体验请用 PC 桌面版；想了解原版请访问原作者网站。</string>
+    <string name="notice_dont_show">不再提示</string>
+    <string name="notice_site">访问原作者网站</string>
+    <string name="notice_desktop">下载 PC 桌面版</string>
+    <string name="notice_ok">知道了</string>
+    <string name="notice_no_browser">没有可用的浏览器</string>
 </resources>

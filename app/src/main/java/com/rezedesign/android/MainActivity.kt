@@ -2,14 +2,20 @@ package com.rezedesign.android
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -20,13 +26,25 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.ValueCallback
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStream
 
 private const val TAG = "RezeDesign"
 
@@ -38,6 +56,23 @@ private const val TAG = "RezeDesign"
  */
 private const val ASSET_DOMAIN = "appassets.androidplatform.net"
 private const val BASE_URL = "https://$ASSET_DOMAIN/"
+
+/** 注入兼容层时用的来源规则（不带尾斜杠）。 */
+private const val BASE_ORIGIN = "https://$ASSET_DOMAIN"
+
+/** document-start 注入的兼容层脚本；随 APK 打包，不入 assets/web（那是构建产物）。 */
+private const val SHIM_ASSET = "shim/shell.js"
+
+/** 兼容层脚本调用的导出桥名字（与 shell.js 里的 window.RezeSave 对应）。 */
+private const val SAVE_BRIDGE = "RezeSave"
+
+/** 「关于手机版」弹窗里的两个外链，一律交给系统浏览器打开。 */
+private const val SITE_URL = "https://reze.design"
+private const val DESKTOP_URL = "https://github.com/BesingBG/reze-design-desktop/releases"
+
+/** 弹窗偏好：勾了「不再提示」即写入。 */
+private const val PREFS_NAME = "shell"
+private const val PREF_NOTICE_DISMISSED = "notice.dismissed"
 
 /** M0 探针页：验证当前设备的 WebView 是否真的能跑 WebGPU。 */
 private const val PROBE_URL = "${BASE_URL}probe/index.html"
@@ -83,18 +118,49 @@ class MainActivity : Activity() {
             WebView.setWebContentsDebuggingEnabled(true)
         }
 
+        applyEdgeToEdge()
+
+        // 直接给 WebView 设 padding 是没用的：它把整块 view 的尺寸当成网页视口，
+        // padding 既不缩小 100vh、也不挪动绘制原点（实测给 WebView 加上 96px 的
+        // paddingTop 后，页面 innerHeight 仍等于整屏高度，顶部工具条照样被状态栏盖住）。
+        // 所以要缩小的是 WebView 的**布局尺寸** —— 交给一层容器来承担 padding。
+        val container = FrameLayout(this)
+        // 系统栏那一条露出来的就是容器的底色（WebView 默认是白的）
+        container.setBackgroundColor(Color.BLACK)
+
         webView = WebView(this)
-        webView.layoutParams = android.view.ViewGroup.LayoutParams(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        webView.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
         )
-        webView.fitsSystemWindows = true
+        container.addView(webView)
         configureWebView(webView)
 
         // 必须在 WebView 创建之后读取，否则 WebView 提供者可能尚未加载。
         webViewPkg = webViewPackageInfo()
 
-        setContentView(webView)
+        // 状态栏 / 手势条 / 挖孔的尺寸变成容器的 padding：WebView 因此被摆在系统栏
+        // 之间，网页视口也就正好等于可见区域 —— 顶部工具条不再和状态栏叠住，
+        // 底部走带也不会被手势条压住。
+        ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            // 打一行日志：这条链路一旦失效，症状是"顶部被状态栏压住"，
+            // 而那在远程测试者的截图里很难和别的问题区分开。有这行就能一眼判定。
+            Log.i(
+                TAG,
+                "系统栏 insets: top=${bars.top} bottom=${bars.bottom}" +
+                    " left=${bars.left} right=${bars.right}",
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
+        setContentView(container)
+
+        // 放在 loadUrl 之前：用户读弹窗的时候，页面已经在后面加载，关掉即可直接用。
+        showNoticeIfNeeded()
 
         // 转屏已经被 Manifest 的 configChanges 挡在重建之外，能走到这里的只有
         // 进程被系统回收后重建（或其它未声明的配置变更）。
@@ -162,6 +228,107 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * 让内容进到系统栏里面，再把系统栏的高度还成内容自己的 padding。
+     *
+     * Android 15（API 35）起，**targetSdk ≥ 35 的应用被强制 edge-to-edge**：窗口不再
+     * 自动让出状态栏和手势条，`fitsSystemWindows` 与 `setDecorFitsSystemWindows(true)`
+     * 都会被系统忽略。这不是哪一行代码写错了，是平台行为变了 —— 曾出现过
+     * 页面顶部工具条和系统状态栏、厂商搜索胶囊叠在一起，场景名被截断。
+     *
+     * 所以修法不是「让系统把内容推开」，而是**自己消费 insets**（见 [onCreate] 里挂在
+     * 容器上的监听器）。这里显式声明 `false` 是为了让 Android 12–14 也走同一条路：
+     * 那些版本上默认仍由 DecorView 自己 inset，若不声明，容器再补一层 padding
+     * 就会把内容多推一次。
+     */
+    private fun applyEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+    }
+
+    /**
+     * 「关于手机版」说明弹窗。
+     *
+     * 为什么要有：这个壳砍掉了上游依赖服务端的一整块东西（账号、发布、画廊），
+     * 又是**桌面布局塞进窄屏**，第一次打开的人很容易直接得出"这软件怎么这么残"。
+     * 与其让人去猜，不如开门见山把局限写清楚，并把出口给出去。
+     *
+     * 为什么放在**原生壳**而不是注入网页：设备 WebGPU 不可用时页面可能是白屏，
+     * 网页里的弹窗根本出不来；原生弹窗在任何情况下都看得见。
+     *
+     * 每个冷启动都弹一次，勾了「不再提示」就不再弹。判断与落盘都走
+     * [PREF_NOTICE_DISMISSED]，键名带 `notice.` 前缀，避免和上游存在
+     * localStorage 里的东西混淆（两者存储位置本来也不同）。
+     */
+    private fun showNoticeIfNeeded() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (prefs.getBoolean(PREF_NOTICE_DISMISSED, false)) return
+
+        val gap = (16 * resources.displayMetrics.density).toInt()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(gap, gap / 2, gap, 0)
+        }
+        content.addView(
+            TextView(this).apply {
+                text = getString(R.string.notice_body)
+                setLineSpacing(0f, 1.15f)
+            },
+        )
+        val dontShow = CheckBox(this).apply { text = getString(R.string.notice_dont_show) }
+        content.addView(dontShow)
+
+        // 两个外链做成对话框内的整行按钮：点它们**不关**对话框，
+        // 用户可以把两个都点完再关闭。
+        content.addView(
+            linkButton(R.string.notice_site, SITE_URL),
+        )
+        content.addView(
+            linkButton(R.string.notice_desktop, DESKTOP_URL),
+        )
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.notice_title)
+            .setView(content)
+            .setPositiveButton(R.string.notice_ok, null)
+            .create()
+
+        // 落盘只放在 dismiss 这一个出口：按钮、返回键、点外部关掉，三条路都算数，
+        // 不会出现「勾了但没生效」。
+        dialog.setOnDismissListener {
+            if (dontShow.isChecked) {
+                prefs.edit().putBoolean(PREF_NOTICE_DISMISSED, true).apply()
+            }
+        }
+        dialog.show()
+    }
+
+    /** 外链按钮：整行、非全大写（否则 "PC" 这种拉丁字母会被喊出来）。 */
+    private fun linkButton(labelRes: Int, url: String): Button =
+        Button(this).apply {
+            setText(labelRes)
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            setOnClickListener { openExternal(url) }
+        }
+
+    /**
+     * 用系统浏览器打开外链。
+     *
+     * 刻意不在壳内预览：这个 WebView 没有地址栏，跳进去就退不回来了；
+     * 而且目标站点是别人的（reze.design / GitHub），在壳里加载等于把壳变成浏览器。
+     */
+    private fun openExternal(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "没有应用能打开 $url", e)
+            Toast.makeText(this, R.string.notice_no_browser, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun configureWebView(view: WebView) {
         with(view.settings) {
             javaScriptEnabled = true
@@ -186,6 +353,11 @@ class MainActivity : Activity() {
         }
 
         view.addJavascriptInterface(ShellBridge(), "AndroidShell")
+        // 导出落盘桥：shell.js 拦截到 <a download> 点击后，把 blob 分片喂进来。
+        // 必须在 loadUrl 之前注册，否则 document-start 注入的脚本看不到它。
+        view.addJavascriptInterface(SaveBridge(), SAVE_BRIDGE)
+
+        injectShim(view)
 
         view.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
@@ -246,6 +418,32 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    /**
+     * 注入兼容层。
+     *
+     * 必须在页面任何脚本之前执行：上游在模块初始化时就会读 `navigator.gpu`、
+     * 建 dock、注册导出路径，晚一步就可能错过。
+     * [WebViewFeature.DOCUMENT_START_SCRIPT] 是唯一能保证这一点的公开机制；
+     * 不支持时**不做降级**——晚注入的 anchor 补丁会漏掉首批导出，与其给出
+     * 一个时灵时不灵的桥，不如在日志里说清楚。
+     */
+    private fun injectShim(view: WebView) {
+        val script = try {
+            assets.open(SHIM_ASSET).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: IOException) {
+            Log.w(TAG, "兼容层脚本缺失（$SHIM_ASSET），导出桥不可用", e)
+            return
+        }
+
+        if (!featureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            Log.w(TAG, "当前 WebView 不支持 document-start 注入，导出桥不可用")
+            return
+        }
+
+        // 只对本地资源域生效：页面里的其它来源（演示资源在 CDN）不该被改到。
+        WebViewCompat.addDocumentStartJavaScript(view, script, setOf(BASE_ORIGIN))
     }
 
     /**
@@ -376,6 +574,148 @@ class MainActivity : Activity() {
                 else -> Log.INFO
             }
             Log.println(priority, TAG, "[page] $message")
+        }
+    }
+
+    /**
+     * 导出落盘桥（M4a）。
+     *
+     * WebView 里 `<a download>` 是**静默失败**的：点击没有任何反应，也不报错。
+     * 兼容层（`assets/shim/shell.js`）把这类点击接管下来，读出卖出的 blob，
+     * 按 512KB 分片 base64 调 [write]，由这里写进系统「下载」目录。
+     *
+     * 落盘位置取 `MediaStore.Downloads` 根目录，**不建子目录**：套壳要的是
+     * 「用户能顺手找到文件」，而 `Downloads` 是安卓统一收拢下载物的地方。
+     * 走 MediaStore 也意味着 **Android 10+ 不需要任何存储权限**。
+     * API 26–28 没有 Downloads 集合，退回应用私有外部目录（不需要权限）。
+     *
+     * 分片是「边收边写」：首片创建条目并 openOutputStream，逐片 append，
+     * 末片关闭并把 `IS_PENDING` 置 0 —— 过程中文件对其它应用不可见，
+     * 不会出现「传输中就被相册/文件管理器读到半截文件」。
+     */
+    private inner class SaveBridge {
+
+        private var out: OutputStream? = null
+        private var pendingUri: Uri? = null
+        private var legacyFile: File? = null
+        private var displayName: String? = null
+        private var written = 0L
+
+        /**
+         * 兼容层每片调用一次。注意本方法运行在 WebView 的 JavaBridge 线程上
+         * （不是 UI 线程），因此文件 IO 可以直接做；UI 操作走 [toastOnUi]。
+         *
+         * 分片由同一段 JS 串行发出，[Synchronized] 只是把这条前提固定下来，
+         * 顺带让「上一份还没收尾」的异常情况有个确定的处理顺序。
+         */
+        @JavascriptInterface
+        @Synchronized
+        fun write(name: String, mime: String, idx: Int, total: Int, base64: String, last: Boolean) {
+            try {
+                if (idx == 0) begin(name, mime)
+                val stream = out ?: return
+                val bytes = Base64.decode(base64, Base64.DEFAULT)
+                stream.write(bytes)
+                written += bytes.size
+                if (last) finish()
+            } catch (t: Throwable) {
+                Log.e(TAG, "写入导出文件失败（$name 第 ${idx + 1}/$total 片）", t)
+                abort()
+                toastOnUi("导出失败：${t.message ?: t.javaClass.simpleName}")
+            }
+        }
+
+        /** 首片：建条目、开流。上一份没正常收尾的话先丢弃，避免两份数据串在一起。 */
+        private fun begin(name: String, mime: String) {
+            abort()
+            val safeName = sanitizeName(name)
+            val safeMime = mime.ifBlank { "application/octet-stream" }
+            displayName = safeName
+            written = 0
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(MediaStore.Downloads.MIME_TYPE, safeMime)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IOException("MediaStore 未返回可用条目")
+                pendingUri = uri
+                out = contentResolver.openOutputStream(uri) ?: throw IOException("无法打开输出流")
+            } else {
+                val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: File(filesDir, "downloads")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, safeName)
+                legacyFile = file
+                out = FileOutputStream(file)
+            }
+        }
+
+        /** 末片：收尾并提示。 */
+        private fun finish() {
+            val stream = out ?: return
+            out = null
+            stream.flush()
+            stream.close()
+
+            val name = displayName
+            val size = written
+            val uri = pendingUri
+            pendingUri = null
+            flushPending(uri)
+
+            if (uri != null) {
+                toastOnUi("已保存到「下载」：$name（${humanSize(size)}）")
+            } else {
+                toastOnUi("已保存：${legacyFile?.name ?: name}（${humanSize(size)}）")
+            }
+            Log.i(TAG, "导出完成 $name，$size 字节")
+            legacyFile = null
+        }
+
+        /** 中途失败：关流、删掉半截条目，别在用户的下载目录里留垃圾。 */
+        private fun abort() {
+            // 不能因为 out 为空就整体跳过：begin() 可能已经建好条目、
+            // 但在开流那一步失败，残留的 pendingUri 同样要清掉。
+            val stream = out
+            out = null
+            if (stream != null) {
+                try {
+                    stream.close()
+                } catch (e: IOException) {
+                    Log.w(TAG, "关闭未完成的输出流失败", e)
+                }
+            }
+            val uri = pendingUri
+            pendingUri = null
+            uri?.let { runCatching { contentResolver.delete(it, null, null) } }
+            legacyFile?.let { runCatching { it.delete() } }
+            legacyFile = null
+        }
+
+        private fun flushPending(uri: Uri?) {
+            if (uri == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+            val values = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            contentResolver.update(uri, values, null, null)
+        }
+
+        /** 文件名要过 MediaStore：去掉分隔符与控制字符，兜底并限长。 */
+        private fun sanitizeName(name: String): String {
+            val cleaned = name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]"), "_").trim()
+            val fallback = cleaned.ifEmpty { "download" }
+            return if (fallback.length > 120) fallback.take(120) else fallback
+        }
+
+        private fun humanSize(bytes: Long): String = when {
+            bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+            bytes >= 1024 -> String.format("%.1f KB", bytes / 1024.0)
+            else -> "$bytes B"
+        }
+
+        private fun toastOnUi(message: String) {
+            runOnUiThread { Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show() }
         }
     }
 }
