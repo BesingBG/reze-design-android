@@ -12,6 +12,7 @@ local.properties
 *.jks
 
 # 构建期产物（由 scripts/build-web.mjs 生成，不入库）
+.build/
 app/src/main/assets/web/*
 !app/src/main/assets/web/.gitkeep
 

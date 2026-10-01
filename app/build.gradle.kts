@@ -47,6 +47,14 @@ android {
         // 上游产物包含 .vmd / .pmx 等自定义扩展名，以及字体与 wasm，
         // 关闭压缩以便 WebView 直接从 assets 读取。
         noCompress += listOf("wasm", "vmd", "pmx", "pmd", "vpd")
+
+        // AAPT2 默认的 ignoreAssetsPattern 里有一条 `<dir>_*`，会忽略所有
+        // 下划线开头的目录。Next 静态导出恰恰把全部 JS/CSS/字体放在 `_next/`
+        // （另有 `_not-found/`），于是产物被打包时被静默剔除 —— APK 里
+        // 只剩 html 和 txt，页面必然白屏，且构建期毫无警告。
+        //
+        // 这里覆盖为 AGP 默认值去掉 `<dir>_*`（保留 `.*`，继续忽略点开头文件）。
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
 }
 
