@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reze Design · WebGPU 探针</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 16px 40px;
+    background: #101014; color: #e6e6ea;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; letter-spacing: .02em; }
+  section { margin-bottom: 16px; }
+  h2 { font-size: 12px; margin: 0 0 8px; color: #9a9aa8; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 8px; border-bottom: 1px solid #26262e; vertical-align: top; word-break: break-word; }
+  td:first-child { color: #9a9aa8; width: 42%; }
+  .ok   { color: #6ee7a8; }
+  .warn { color: #f2c14e; }
+  .bad  { color: #ff7b72; }
+  .muted { color: #6b6b78; }
+  .verdict {
+    padding: 12px 14px; border-radius: 8px; margin-bottom: 16px;
+    border: 1px solid #2e2e38; background: #17171d;
+    font-size: 14px; font-weight: 600;
+  }
+  .verdict.ok   { border-color: #2f6f4f; background: #12241b; color: #6ee7a8; }
+  .verdict.warn { border-color: #6f5a2a; background: #241f12; color: #f2c14e; }
+  .verdict.bad  { border-color: #6f2f2f; background: #241212; color: #ff7b72; }
+  .verdict small { display: block; font-weight: 400; font-size: 12px; margin-top: 4px; opacity: .85; }
+  canvas { width: 100%; height: 180px; display: block; border-radius: 8px; background: #000; border: 1px solid #26262e; }
+  #log { max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+         background: #0b0b0f; border: 1px solid #26262e; border-radius: 8px; padding: 10px; }
+  #log .e { color: #ff7b72; } #log .w { color: #f2c14e; } #log .i { color: #9a9aa8; }
+  button {
+    appearance: none; background: #2a2a34; color: #e6e6ea; border: 1px solid #3a3a46;
+    border-radius: 6px; padding: 7px 14px; font: inherit; cursor: pointer;
+  }
+  button:active { background: #34343f; }
+</style>
+</head>
+<body>
+
+<h1>Reze Design · WebGPU 探针（M0）</h1>
+
+<div id="verdict" class="verdict muted">检测中…</div>
+
+<section>
+  <h2>宿主环境</h2>
+  <table id="env"></table>
+</section>
+
+<section>
+  <h2>WebGPU 能力</h2>
+  <table id="gpu"></table>
+</section>
+
+<section>
+  <h2>最小三角形（真渲染验证）</h2>
+  <canvas id="cv"></canvas>
+  <table id="render" style="margin-top:8px"></table>
+</section>
+
+<section>
+  <h2>日志</h2>
+  <div id="log"></div>
+  <div style="margin-top:10px"><button id="copy">复制报告</button></div>
+</section>
+
+<script>
+"use strict";
+
+// ---------- 小工具 ----------
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const rows = {};
+function row(tableId, key, value, cls) {
+  let tr = rows[tableId + "\u0000" + key];
+  if (!tr) {
+    tr = document.createElement("tr");
+    tr.innerHTML = '<td>' + esc(key) + "</td><td></td>";
+    $(tableId).appendChild(tr);
+    rows[tableId + "\u0000" + key] = tr;
+  }
+  const cell = tr.lastElementChild;
+  cell.className = cls || "";
+  cell.textContent = value == null ? "—" : String(value);
+}
+
+function log(level, msg) {
+  const line = document.createElement("div");
+  line.className = level === "error" ? "e" : level === "warn" ? "w" : "i";
+  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+  $("log").appendChild(line);
+  $("log").scrollTop = $("log").scrollHeight;
+  if (window.AndroidShell) { try { AndroidShell.log(level, msg); } catch (_) {} }
+}
+
+function verdict(cls, title, detail) {
+  const el = $("verdict");
+  el.className = "verdict " + cls;
+  el.innerHTML = esc(title) + (detail ? "<small>" + esc(detail) + "</small>" : "");
+  // 同时落到 logcat，便于用 adb 直接读取结果（无需截图）
+  log("info", "VERDICT[" + cls + "] " + title + (detail ? " — " + detail : ""));
+}
+
+// 收集的报告文本，供「复制报告」使用
+const report = [];
+
+// ---------- 1. 宿主环境 ----------
+function collectEnv() {
+  row("env", "页面来源", location.origin, location.protocol === "https:" ? "ok" : "bad");
+  row("env", "安全上下文", String(window.isSecureContext), window.isSecureContext ? "ok" : "bad");
+  row("env", "User-Agent", navigator.userAgent);
+  row("env", "设备像素比", window.devicePixelRatio);
+  row("env", "屏幕", screen.width + "×" + screen.height);
+
+  if (!window.AndroidShell) {
+    row("env", "AndroidShell 桥", "不可用（浏览器中打开？）", "warn");
+    return { bridged: false };
+  }
+  try {
+    const info = JSON.parse(AndroidShell.environment());
+    row("env", "WebView 包名", info.webViewPackage);
+    row("env", "WebView 版本", info.webViewVersion,
+      info.webViewTooOld ? "bad" : "ok");
+    row("env", "WebGPU 最低 WebView", "≥ " + info.minWebViewMajor, "muted");
+    row("env", "Android", info.androidRelease + " (API " + info.androidSdk + ")");
+    row("env", "机型", info.manufacturer + " " + info.model);
+    row("env", "DOCUMENT_START_SCRIPT", String(info.documentStartScript),
+      info.documentStartScript ? "ok" : "warn");
+    return { bridged: true, info: info };
+  } catch (e) {
+    row("env", "AndroidShell.environment()", "解析失败: " + e.message, "bad");
+    return { bridged: false };
+  }
+}
+
+// ---------- 2. WebGPU 能力 ----------
+async function collectGpu() {
+  row("gpu", "navigator.gpu", typeof navigator.gpu, navigator.gpu ? "ok" : "bad");
+  if (!navigator.gpu) {
+    return { stage: "no-gpu", reason: "navigator.gpu 不存在" };
+  }
+
+  let adapter = null;
+  try {
+    adapter = await navigator.gpu.requestAdapter();
+  } catch (e) {
+    row("gpu", "requestAdapter()", "抛异常: " + e.message, "bad");
+    return { stage: "no-adapter", reason: "requestAdapter 抛异常" };
+  }
+  row("gpu", "requestAdapter()", adapter ? "返回 adapter" : "返回 null", adapter ? "ok" : "bad");
+  if (!adapter) {
+    // 再问一次：高功耗适配器有时单独可用
+    try {
+      const hp = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+      row("gpu", "high-performance 重试", hp ? "有" : "仍为 null", hp ? "warn" : "bad");
+      adapter = hp;
+    } catch (e) {
+      row("gpu", "high-performance 重试", "抛异常: " + e.message, "bad");
+    }
+  }
+  if (!adapter) {
+    // 软件适配器（CPU Vulkan / SwiftShader）只能通过 forceFallbackAdapter 拿到。
+    // 模拟器、无独显的虚拟机通常只有这一条路。
+    try {
+      const fb = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true });
+      row("gpu", "forceFallbackAdapter 重试", fb ? "有（软件适配器）" : "仍为 null", fb ? "warn" : "bad");
+      adapter = fb;
+    } catch (e) {
+      row("gpu", "forceFallbackAdapter 重试", "抛异常: " + e.message, "bad");
+    }
+  }
+  if (!adapter) {
+    return { stage: "no-adapter", reason: "requestAdapter 返回 null（平台门或 GPU 黑名单）" };
+  }
+
+  try {
+    const info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : null);
+    if (info) {
+      row("gpu", "adapter.vendor", info.vendor);
+      row("gpu", "adapter.architecture", info.architecture);
+      row("gpu", "adapter.device", info.device);
+      row("gpu", "adapter.description", info.description);
+    } else {
+      row("gpu", "adapter.info", "不可用（较新规范已移除）", "warn");
+    }
+  } catch (e) {
+    row("gpu", "adapter.info", "读取失败: " + e.message, "warn");
+  }
+
+  row("gpu", "isFallbackAdapter", String(adapter.isFallbackAdapter));
+
+  const features = Array.from(adapter.features).sort();
+  row("gpu", "features (" + features.length + ")", features.join(", ") || "（无）");
+  report.push("features: " + features.join(","));
+
+  // reze-engine 关心的关键特性
+  const wanted = ["timestamp-query", "depth-clip-control", "texture-compression-bc",
+                  "texture-compression-etc2", "texture-compression-astc", "float32-filterable"];
+  row("gpu", "关键特性",
+    wanted.map((f) => (adapter.features.has(f) ? "✓" : "✗") + f).join("  "),
+    adapter.features.has("texture-compression-etc2") ? "ok" : "warn");
+
+  const l = adapter.limits;
+  const keyLimits = ["maxTextureDimension2D", "maxBufferSize", "maxStorageBufferBindingSize",
+                     "maxComputeWorkgroupStorageSize", "maxBindGroups", "maxVertexBuffers"];
+  keyLimits.forEach((k) => row("gpu", k, l[k]));
+
+  let fmt = null;
+  try {
+    fmt = navigator.gpu.getPreferredCanvasFormat();
+    row("gpu", "getPreferredCanvasFormat()", fmt, "ok");
+  } catch (e) {
+    row("gpu", "getPreferredCanvasFormat()", "抛异常: " + e.message, "bad");
+  }
+
+  return { stage: "adapter", adapter: adapter, format: fmt, features: features };
+}
+
+// ---------- 3. 最小三角形 ----------
+const TRIANGLE_WGSL = `
+struct VOut { @builtin(position) pos: vec4f, @location(0) color: vec4f };
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> VOut {
+  var p = array<vec2f, 3>(vec2f(0.0, -0.7), vec2f(0.7, 0.7), vec2f(-0.7, 0.7));
+  var c = array<vec3f, 3>(vec3f(1.0, 0.35, 0.35), vec3f(0.35, 1.0, 0.55), vec3f(0.4, 0.6, 1.0));
+  var o: VOut;
+  o.pos = vec4f(p[i], 0.0, 1.0);
+  o.color = vec4f(c[i], 1.0);
+  return o;
+}
+
+@fragment
+fn fs(in: VOut) -> @location(0) vec4f { return in.color; }
+`;
+
+const frameTimes = [];
+let stopRender = null;
+
+async function collectRender(gpu) {
+  if (gpu.stage !== "adapter") {
+    row("render", "状态", "跳过（无可用 adapter）", "warn");
+    return { stage: "skipped" };
+  }
+
+  const canvas = $("cv");
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  canvas.width = w;
+  canvas.height = h;
+
+  const context = canvas.getContext("webgpu");
+  row("render", "canvas.getContext('webgpu')", context ? "成功" : "失败", context ? "ok" : "bad");
+  if (!context) return { stage: "no-context" };
+
+  const format = gpu.format || navigator.gpu.getPreferredCanvasFormat();
+
+  let device = null;
+  try {
+    device = await gpu.adapter.requestDevice();
+  } catch (e) {
+    row("render", "requestDevice()", "抛异常: " + e.message, "bad");
+    return { stage: "no-device" };
+  }
+  row("render", "requestDevice()", "成功", "ok");
+
+  device.lost.then((info) => {
+    log("warn", "device lost: " + info.reason + " — " + info.message);
+    row("render", "device.lost", info.reason + ": " + info.message, "bad");
+    if (stopRender) stopRender();
+  });
+  device.addEventListener("uncapturederror", (e) => {
+    log("error", "uncaptured: " + e.error.message);
+  });
+
+  context.configure({ device: device, format: format, alphaMode: "opaque" });
+
+  const module = device.createShaderModule({ code: TRIANGLE_WGSL });
+  const compilation = await module.getCompilationInfo();
+  const msgs = compilation.messages;
+  row("render", "着色器编译", msgs.length === 0 ? "无错误" : msgs.length + " 条消息",
+      msgs.some((m) => m.type === "error") ? "bad" : "ok");
+  msgs.forEach((m) => log(m.type === "error" ? "error" : "warn",
+    "shader " + m.type + " @" + m.lineNum + ": " + m.message));
+
+  const pipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: module, entryPoint: "vs" },
+    fragment: { module: module, entryPoint: "fs", targets: [{ format: format }] },
+    primitive: { topology: "triangle-list" },
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: context.getCurrentTexture().createView(),
+      clearValue: { r: 0.06, g: 0.06, b: 0.08, a: 1 },
+      loadOp: "clear", storeOp: "store",
+    }],
+  });
+  pass.setPipeline(pipeline);
+  pass.draw(3);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone();
+
+  // 首帧已提交成功 → 采样 FPS
+  let raf = 0, last = performance.now();
+  const tick = () => {
+    const now = performance.now();
+    frameTimes.push(now - last);
+    if (frameTimes.length > 90) frameTimes.shift();
+    last = now;
+    // 每帧重绘一次，确认持续出图而不只是首帧可用
+    const e = device.createCommandEncoder();
+    const p = e.beginRenderPass({
+      colorAttachments: [{
+        view: context.getCurrentTexture().createView(),
+        clearValue: { r: 0.06, g: 0.06, b: 0.08, a: 1 },
+        loadOp: "clear", storeOp: "store",
+      }],
+    });
+    p.setPipeline(pipeline);
+    p.draw(3);
+    p.end();
+    device.queue.submit([e.finish()]);
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  stopRender = () => cancelAnimationFrame(raf);
+
+  await new Promise((r) => setTimeout(r, 1500));
+  stopRender();
+
+  const avg = frameTimes.reduce((a, b) => a + b, 0) / Math.max(1, frameTimes.length);
+  const fps = avg > 0 ? 1000 / avg : 0;
+  row("render", "平均帧时间", avg.toFixed(2) + " ms", avg < 25 ? "ok" : "warn");
+  row("render", "估算帧率", fps.toFixed(1) + " FPS", fps > 40 ? "ok" : "warn");
+  row("render", "采样帧数", frameTimes.length);
+  log("info", "三角形渲染完成，" + fps.toFixed(1) + " FPS");
+
+  return { stage: "rendered", fps: fps };
+}
+
+// ---------- 主流程：三分类门禁 ----------
+(async function main() {
+  log("info", "探针启动 · " + location.href);
+  const env = collectEnv();
+
+  if (!window.isSecureContext) {
+    verdict("bad", "✗ 非安全上下文", "WebGPU 要求 https:// 或 http://localhost，当前为 " + location.protocol);
+    row("gpu", "—", "因非安全上下文跳过 WebGPU 检测", "warn");
+    row("render", "—", "跳过", "warn");
+    return;
+  }
+
+  const gpu = await collectGpu();
+  const rendered = await collectRender(gpu);
+
+  if (env.bridged && env.info.webViewTooOld && gpu.stage === "no-gpu") {
+    verdict("bad", "✗ WebView 过旧",
+      "当前 WebView " + env.info.webViewVersion + "，WebGPU 需要 ≥ " + env.info.minWebViewMajor + "。请更新「Android System WebView」。");
+  } else if (gpu.stage === "no-gpu") {
+    verdict("bad", "✗ 无 navigator.gpu",
+      "WebGPU API 不可用。检查 WebView 版本或 GPU 是否被平台门/黑名单拦截。");
+  } else if (gpu.stage === "no-adapter") {
+    verdict("bad", "✗ 无可用 GPU adapter",
+      "API 存在但 requestAdapter() 返回 null —— 典型原因是 GPU 驱动未通过 Vulkan 1.1 平台门，或设备在 Chromium 黑名单中。");
+  } else if (rendered.stage === "rendered" && rendered.fps > 40) {
+    verdict("ok", "✓ 真机可跑 WebGPU",
+      "三角形渲染成功，" + rendered.fps.toFixed(1) + " FPS，可以进入 M1。");
+  } else if (rendered.stage === "rendered") {
+    verdict("warn", "△ 可跑但帧率偏低",
+      "渲染成功但仅 " + rendered.fps.toFixed(1) + " FPS，需在 M2 关注性能降级。");
+  } else {
+    verdict("warn", "△ 部分可用",
+      "adapter 可用但渲染阶段失败于「" + rendered.stage + "」，见下方日志。");
+  }
+
+  // 把完整报告直接送到 logcat，便于用 adb 读取（不依赖截图/剪贴板）
+  if (window.AndroidShell) {
+    buildReport().split("\n").forEach((l) => {
+      if (l) { try { AndroidShell.log("info", l); } catch (_) {} }
+    });
+  }
+})();
+
+// ---------- 报告汇总 ----------
+function buildReport() {
+  const lines = [];
+  lines.push("=== Reze Design WebGPU 探针 ===");
+  lines.push("时间: " + new Date().toISOString());
+  document.querySelectorAll("table").forEach((t) => {
+    lines.push("");
+    t.querySelectorAll("tr").forEach((tr) => {
+      lines.push(tr.children[0].textContent + ": " + tr.children[1].textContent);
+    });
+  });
+  return lines.join("\n");
+}
+
+// ---------- 复制报告 ----------
+$("copy").addEventListener("click", async () => {
+  const text = buildReport() + "\n\n日志:\n" + $("log").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    log("info", "报告已复制到剪贴板（" + text.length + " 字符）");
+  } catch (e) {
+    // 剪贴板不可用时，退化为选中日志区
+    log("warn", "剪贴板不可用: " + e.message);
+    const range = document.createRange();
+    range.selectNodeContents($("log"));
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+});
+</script>
+</body>
+</html>

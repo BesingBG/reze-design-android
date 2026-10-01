@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 使用平台主题，不引入 AppCompat / Material 依赖，保持依赖面最小。 -->
+    <style name="Theme.RezeDesignAndroid" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

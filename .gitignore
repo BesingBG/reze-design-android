@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+!.gitignore
+
+# Android / 本机配置
+local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# 构建期产物（由 scripts/build-web.mjs 生成，不入库）
+app/src/main/assets/web/*
+!app/src/main/assets/web/.gitkeep
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 可选：完全隔离的 Gradle 缓存
+.gradle-home/

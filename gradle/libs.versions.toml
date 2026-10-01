@@ -1,0 +1,15 @@
+[versions]
+# 版本选择原则：优先使用本机 Gradle 缓存中已有的版本，保证离线可构建。
+# 本机已缓存：AGP 8.0.0 / 8.2.0 / 8.7.3 / 9.4.0，Gradle 8.13，Kotlin 2.2.10
+agp = "8.7.3"
+kotlin = "2.2.10"
+androidxWebkit = "1.12.1"
+
+[libraries]
+# WebViewCompat / WebViewAssetLoader / WebViewFeature 都来自这里，
+# 是本工程唯一的核心依赖（addDocumentStartJavaScript 注入兼容层时依赖它 >= 1.8.0）
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "androidxWebkit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
