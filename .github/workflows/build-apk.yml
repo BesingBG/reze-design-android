@@ -1,6 +1,7 @@
 name: Build APK
 
-# 手动触发（与桌面版的 build-installer.yml 对齐；「定时看上游更新」的那条流水线留到以后再加）。
+# 手动触发（与桌面版的 build-installer.yml 对齐）；同时可被 auto-build.yml
+# 通过 workflow_call 复用（每日定时看上游更新那条流水线只做检查与调度）。
 #
 # 一次运行 = 一条命令出包：契约检查 → 上游静态产物 → 签名 APK → 可选发 Pre-release。
 # 真正的构建逻辑都在 scripts/ 里，本地跑的是同一套，不在这里重写一遍。
@@ -19,6 +20,15 @@ on:
         default: ""
       upload_release:
         description: "构建完成后以 Pre-release 发布（tag 形如 v1.0.1-1；同名则覆盖）"
+        type: boolean
+        default: true
+  # 供 auto-build.yml 按需调用；inputs 与上面同名同型，语义一致
+  workflow_call:
+    inputs:
+      upstream_ref:
+        type: string
+        default: ""
+      upload_release:
         type: boolean
         default: true
 

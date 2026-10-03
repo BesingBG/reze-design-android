@@ -1,0 +1,75 @@
+name: Auto Build on Upstream Update
+
+# 每天定时检查上游 reze-design 是否有新提交，有则复用 build-apk.yml 出包发 Pre-release。
+# 判断基准与桌面版一致：拿「上一次 Release 正文里的上游短 SHA」和当前上游 main 对比，
+# 相同跳过、不同才构建；同版本覆盖同名 tag。不回写子模块指针、不产生任何提交。
+#
+# 本文件只做检查与调度，构建逻辑全部在 build-apk.yml / scripts/ 里（secrets: inherit 透传签名密钥）。
+
+on:
+  schedule:
+    - cron: "8 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      has_update: ${{ steps.compare.outputs.has_update }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve upstream HEAD
+        id: resolve
+        shell: bash
+        run: |
+          SHA=$(git ls-remote https://github.com/AmyangXYZ/reze-design.git refs/heads/main | cut -c1-7)
+          if [ -z "$SHA" ]; then
+            echo "::error::无法获取上游 main 的 SHA"
+            exit 1
+          fi
+          echo "Upstream main = $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with latest release
+        id: compare
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing release — first build"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Latest release: $LATEST_TAG"
+          RELEASE_BODY=$(gh release view "$LATEST_TAG" --json body --jq '.body' 2>/dev/null || echo "")
+          # Release 正文里的 "> **上游版本:** v1.2.1 (93778d2)" —— 与桌面版同一提取方式
+          RELEASE_SHA=$(echo "$RELEASE_BODY" | grep -oE '\([a-f0-9]{7,}\)' | head -1 | tr -d '()' || true)
+          if [ -z "$RELEASE_SHA" ]; then
+            echo "Cannot determine previous build SHA — triggering build"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Previous build: $RELEASE_SHA / Upstream now: $CURRENT_SHA"
+          if [ "$RELEASE_SHA" = "$CURRENT_SHA" ]; then
+            echo "No update — upstream SHA matches latest release"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Update detected!"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.has_update == 'true'
+    uses: ./.github/workflows/build-apk.yml
+    with:
+      upstream_ref: ${{ needs.check.outputs.sha }}
+      upload_release: true
+    secrets: inherit
