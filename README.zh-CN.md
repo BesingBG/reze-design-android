@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-基于 [reze-design](https://github.com/AmyangXYZ/reze-design)（WebGPU MMD 动画编辑器）封装的非官方安卓版。上游前端被静态导出后打进 APK，**完全离线运行**，不依赖任何外部服务。
+基于 [reze-design](https://github.com/AmyangXYZ/reze-design)（WebGPU MMD 动画编辑器）封装的非官方安卓版。**用于编辑、播放和渲染 MMD（MikuMikuDance）模型与 VMD 动画片段，通过 WebGPU 实时本地渲染。** 上游前端被静态导出后打进 APK，**完全离线运行**，不依赖任何外部服务。
 
 套壳哲学：Kotlin + 系统 WebView 裸壳，**不修改上游任何源码**。所有适配只发生在构建期（`scripts/`）和运行期（`app/src/main/assets/shim/`），因此能跟着上游更新走，而不是分叉出一套自己的 UI。
 
@@ -10,11 +10,9 @@
 
 ![Reze Design Android 总览](docs/screenshots/overview.webp)
 
-> **截图素材：**模型《丽塔—窈窕谍影》作者：神帝宇 · 动作：Digitrevx · 截图提供：History_exe
-
-> **导入模型：**请把模型文件夹（.pmx + 贴图）打成 zip 压缩包后导入 zip；直接选 .pmx 文件无法正常使用（贴图靠 zip 内的相对路径解析）。
-
-> **语言：**界面支持中英双语，首次启动跟随系统语言，可随时在命令面板（右上搜索框）里切换。
+> 截图素材：模型《丽塔—窈窕谍影》作者：神帝宇 · 动作：Digitrevx · 截图提供：History_exe
+> 导入模型：请把模型文件夹（.pmx + 贴图）打成 zip 压缩包后导入 zip；直接选 .pmx 文件无法正常使用（贴图靠 zip 内的相对路径解析）。
+> 语言：界面支持中英双语，首次启动跟随系统语言，可随时在命令面板（右上搜索框）里切换。
 
 ## 已实现
 
@@ -108,7 +106,7 @@ gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore
 
 > ⚠️ `reze-release.jks` 与里面的口令**必须一起备份**：keystore 决定 App 的身份，丢了就再也无法覆盖升级已安装的包。
 
-流水线目前**只有手动触发**，不响应 push 与 tag；「定时查上游更新」的自动流水线还没做。
+流水线不响应 push 与 tag。每天定时（**Auto Build on Upstream Update**，UTC 08:08 / 北京 16:08）会对比上游最新提交与最新 Release，**有新提交才**自动出包并发 Pre-release，也可以手动触发。
 
 ## 目录结构
 

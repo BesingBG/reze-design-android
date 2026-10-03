@@ -1,8 +1,8 @@
 # Reze Design Android
 
-[中文](README.zh-CN.md)
+[点我查看中文说明](README.zh-CN.md)
 
-An unofficial Android shell for [reze-design](https://github.com/AmyangXYZ/reze-design) — the WebGPU MMD (MikuMikuDance) animation editor. The upstream frontend is statically exported and bundled into the APK, so the editor runs **fully offline** on the phone, with no external services.
+An unofficial Android shell for [reze-design](https://github.com/AmyangXYZ/reze-design) — the WebGPU MMD (MikuMikuDance) animation editor. Use it to **edit, play, and render MMD (MikuMikuDance) models and VMD animation clips, with real-time local rendering over WebGPU**. The upstream frontend is statically exported and bundled into the APK, so the editor runs **fully offline** on the phone, with no external services.
 
 Shell philosophy: a bare Kotlin + system WebView wrapper that **never patches upstream sources**. All adaptation happens at build time (`scripts/`) and at runtime (`app/src/main/assets/shim/`), so the shell can keep following upstream releases instead of forking the UI.
 
@@ -11,9 +11,7 @@ Shell philosophy: a bare Kotlin + system WebView wrapper that **never patches up
 ![Reze Design Android overview](docs/screenshots/overview.webp)
 
 > **Screenshot credits:** model 「丽塔—窈窕谍影」 by 神帝宇 · motion by Digitrevx · screenshot by History_exe
-
 > **Importing a model:** zip the model folder (`.pmx` + textures) and import the **zip archive** — picking a bare `.pmx` directly does not work (textures resolve from the zip's relative paths).
-
 > **Language:** the interface is available in **English and Chinese**. It follows your device language on first launch; switch anytime via the **Language** entry in the search/command palette.
 
 ## Features
@@ -108,7 +106,7 @@ gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore
 
 > ⚠️ `reze-release.jks` and its passwords **must be backed up together**: the keystore is the app's identity, and losing it means never being able to upgrade an installed copy in place.
 
-The pipeline is **manual-only** for now — it does not run on push or tag, and the scheduled "check upstream" pipeline is not built yet.
+Builds do not run on push or tag. A daily scheduled workflow — **Auto Build on Upstream Update** (08:08 UTC / 16:08 Beijing) — compares upstream's latest commit against the latest release and automatically builds and publishes a new APK only when something changed; it can also be triggered manually.
 
 ## Project structure
 
