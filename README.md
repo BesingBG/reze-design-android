@@ -6,6 +6,16 @@ An unofficial Android shell for [reze-design](https://github.com/AmyangXYZ/reze-
 
 Shell philosophy: a bare Kotlin + system WebView wrapper that **never patches upstream sources**. All adaptation happens at build time (`scripts/`) and at runtime (`app/src/main/assets/shim/`), so the shell can keep following upstream releases instead of forking the UI.
 
+## Screenshots
+
+![Reze Design Android overview](docs/screenshots/overview.webp)
+
+> **Screenshot credits:** model 「丽塔—窈窕谍影」 by 神帝宇 · motion by Digitrevx · screenshot by History_exe
+
+> **Importing a model:** zip the model folder (`.pmx` + textures) and import the **zip archive** — picking a bare `.pmx` directly does not work (textures resolve from the zip's relative paths).
+
+> **Language:** the interface is available in **English and Chinese**. It follows your device language on first launch; switch anytime via the **Language** entry in the search/command palette.
+
 ## Features
 
 - **Fully offline**: the whole editor ships inside the APK, served to the WebView over `https://appassets.androidplatform.net/` so WebGPU still gets a secure context

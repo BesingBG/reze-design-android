@@ -6,6 +6,16 @@
 
 套壳哲学：Kotlin + 系统 WebView 裸壳，**不修改上游任何源码**。所有适配只发生在构建期（`scripts/`）和运行期（`app/src/main/assets/shim/`），因此能跟着上游更新走，而不是分叉出一套自己的 UI。
 
+## 截图
+
+![Reze Design Android 总览](docs/screenshots/overview.webp)
+
+> **截图素材：**模型《丽塔—窈窕谍影》作者：神帝宇 · 动作：Digitrevx · 截图提供：History_exe
+
+> **导入模型：**请把模型文件夹（.pmx + 贴图）打成 zip 压缩包后导入 zip；直接选 .pmx 文件无法正常使用（贴图靠 zip 内的相对路径解析）。
+
+> **语言：**界面支持中英双语，首次启动跟随系统语言，可随时在命令面板（右上搜索框）里切换。
+
 ## 已实现
 
 - **完全离线**：整个编辑器在 APK 里，经 `https://appassets.androidplatform.net/` 提供给 WebView —— 用真实 https 源是为了让 WebGPU 拿到安全上下文
