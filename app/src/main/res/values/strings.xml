@@ -2,7 +2,7 @@
     <string name="app_name">Reze Design</string>
 
     <string name="notice_title">说明</string>
-    <string name="notice_body">本应用是 Reze Design 的非官方安卓套壳，前端取自上游网页版静态打包，本地离线运行。\n\n设备要求：支持 WebGPU（约 Android 12+、系统 WebView 121+）；不满足时界面能打开，但模型渲染不出来。</string>
+    <string name="notice_body">本应用是 Reze Design 的非官方安卓套壳，前端取自上游网页版静态打包，本地离线运行。\n\n设备要求：支持 WebGPU（约 Android 12+、系统 WebView 121+）；不满足时界面能打开，但模型渲染不出来。\n\n模型导入：请把模型文件夹（.pmx + 贴图）压缩成 zip 后导入 zip 包，不要直接导入 .pmx —— 否则丢贴图、显示白模。</string>
     <string name="notice_version">版本 %1$s（构建号 %2$d）\n基于上游 reze-design v%3$s（%4$s）构建于 %5$s</string>
     <string name="notice_dont_show">不再提示</string>
     <string name="notice_site">访问原作者网站</string>
