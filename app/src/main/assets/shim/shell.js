@@ -7,8 +7,9 @@
  * 本文件只做运行期适配，不修改上游一行代码；上游更新后这里失配的话，
  * 各段都是「检测不到就什么都不做」，最坏结果是退回原生行为，而不是把页面改坏。
  *
- * 两段彼此独立，任一段的前置条件不满足都不影响另一段：
+ * 三段彼此独立，任一段的前置条件不满足都不影响其它段：
  *   M4a  导出桥：接管 `<a download>` 的落盘
+ *   M4b  文件选择器对齐：让渲染视频离开 WebView 里不可用的 FSA picker
  *   M5a  触屏可达性：让触屏够不着的控件显形
  */
 (function () {
@@ -109,6 +110,71 @@
 
   defaultDockOpen();
   revealHoverOnlyActions();
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // M4b · 文件选择器对齐（渲染视频点了没反应的那条路）
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * 为什么要有这一段：**渲染视频和截图在壳里走的不是同一条路**。
+   *
+   * 截图（`captureStill`）直接产出 blob，交给 M4a 的锚点桥落盘 —— 一直是好的。
+   * 渲染视频（`components/editor/render-panel.tsx` 的 `start()`）在开始渲染**之前**
+   * 先问一句"存哪儿"：`"showSaveFilePicker" in window` 为真就调
+   * `showSaveFilePicker()` → `handle.createWritable()`，编码出的每一帧流式写进
+   * 这个 handle；只有它**抛出非 AbortError 的异常**时，上游才回落到内存 blob
+   * （那条路才轮到 M4a 的锚点桥）。PNG 序列同理，走 `showDirectoryPicker`。
+   *
+   * 缺口在于：WebView 确实**暴露**了这个 API（MDN：WebView Android 132+ Full support），
+   * 却给不出可用的落盘目标 —— 系统文件选择器那套 SAF `content://` URI 与 FSA 需要的
+   * 可写 handle 对不上。而上游把 `AbortError` 一律当作"用户取消"，**静默 return**：
+   * 于是表现就是"点了渲染视频，按钮动了一下，下面既没有进度、也没有报错" ——
+   * 因为 `setExporting(true)`（进度条与红色「取消」按钮的唯一开关）在那之后才执行。
+   *
+   * 修法是把这两个 picker 从页面里拿掉：上游用 `in window` 探测，探测不到就走它自己
+   * 写好的回落分支（源码注释原话："Picker unavailable/failed for another reason —
+   * fall back to memory."）。渲染视频于是回到内存 blob → M4a 锚点桥 → 系统「下载」目录，
+   * 进度条也就回来了。PNG 序列没有内存回落，拿掉 picker 会让上游给出它自己的
+   * 「需要选择文件夹」文案，而不是点了没反应。
+   *
+   * 只在**有壳桥**时动手：把同一份产物挂到普通 Chromium 浏览器里调试时，FSA 是真的
+   * 可用，这段就该什么都不做。
+   */
+  function neutralizeFilePickers() {
+    var saveBridge = window.RezeSave;
+    if (!saveBridge || typeof saveBridge.write !== "function") return;
+
+    /** 拿不掉（属性不可配置）时的兜底：立刻以非 AbortError 拒绝，同样落到回落分支。 */
+    function unavailable() {
+      return Promise.reject(
+        new DOMException("File picker is not available in this WebView", "NotSupportedError"),
+      );
+    }
+
+    function drop(name) {
+      // 属性挂在 Window.prototype 上，自己的影子属性与原型上的都要删。
+      try { delete window[name]; } catch (e) {}
+      try { delete Object.getPrototypeOf(window)[name]; } catch (e) {}
+      if (!(name in window)) return true;
+      try {
+        Object.defineProperty(window, name, {
+          configurable: true,
+          writable: true,
+          enumerable: false,
+          value: unavailable,
+        });
+        return true;
+      } catch (e) {
+        console.warn("[reze-shim] 无法接管 " + name + "：" + (e && e.message ? e.message : e));
+        return false;
+      }
+    }
+
+    drop("showSaveFilePicker");
+    drop("showDirectoryPicker");
+  }
+
+  neutralizeFilePickers();
 
   // ══════════════════════════════════════════════════════════════════════════
   // M4a · 导出桥
