@@ -14,7 +14,7 @@ plugins {
 // 版本号（M6）
 //
 // 唯一版本源是**上游 submodule 的 package.json**，与桌面版同一套做法：
-// versionName 原样取它（当前 1.0.1），保持"干净"，方便和上游发布对齐。
+// versionName 原样取它（当前 1.3.1），保持"干净"，方便和上游发布对齐。
 //
 // versionCode 由它派生 + 壳自己的修订号，必须**严格递增**（不递增就装不上新版）：
 //     versionCode = 主*1_000_000 + 次*10_000 + 修订*100 + 壳修订号
@@ -108,7 +108,7 @@ android {
         versionName = appVersionName
 
         // 构建信息进 BuildConfig，由「关于手机版」弹窗展示（M6）。
-        // 版本号是干净的 1.0.1，拿到包的人靠这三项核对"我装的是哪一版"。
+        // 版本号是干净的 versionName（当前 1.3.1），拿到包的人靠这三项核对"我装的是哪一版"。
         buildConfigField("String", "UPSTREAM_VERSION", "\"$appVersionName\"")
         buildConfigField("String", "UPSTREAM_COMMIT", "\"$upstreamCommit\"")
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")

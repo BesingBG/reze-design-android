@@ -49,7 +49,7 @@ jobs:
           fi
           echo "Latest release: $LATEST_TAG"
           RELEASE_BODY=$(gh release view "$LATEST_TAG" --json body --jq '.body' 2>/dev/null || echo "")
-          # Release 正文里的 "> **上游版本:** v1.2.1 (93778d2)" —— 与桌面版同一提取方式
+          # Release 正文里的 "> **上游版本:** v1.3.1 (854ff2f)" —— 与桌面版同一提取方式
           RELEASE_SHA=$(echo "$RELEASE_BODY" | grep -oE '\([a-f0-9]{7,}\)' | head -1 | tr -d '()' || true)
           if [ -z "$RELEASE_SHA" ]; then
             echo "Cannot determine previous build SHA — triggering build"
