@@ -65,9 +65,13 @@ const EXCLUDE_ENTRIES = [
  *   app/[user]/**   → generateStaticParams + revalidate + db
  *   app/analysis/** → force-dynamic + db
  *
- * 只是移出 staging，不删除上游文件；移出后如果 lib/ 下的服务端模块
- * （lib/db、lib/auth、lib/public-pages…）不再被任何保留页面引用，
- * 它们自然不进入打包图。
+ * 落到 .build/_disabled/（staging 之外），不删除上游文件；移出后如果
+ * lib/ 下的服务端模块（lib/db、lib/auth、lib/public-pages…）不再被任何
+ * 保留页面引用，它们自然不进入打包图。
+ *
+ * 为什么必须在 staging 之外：上游 tsconfig 的 include 递归覆盖所有 .ts，
+ * 放在 staging 里的 _disabled/ 照样会被 next build 类型检查 —— 上游 1.3.1
+ * 的 app/admin/usage.tsx import 了被移走的 @/app/api/…/route，正是这样炸的。
  */
 const SERVER_ROUTES = ["api", "admin", "[user]", "analysis"]
 
@@ -175,10 +179,11 @@ function patchNextConfig() {
   console.log("      output: export / trailingSlash / images.unoptimized")
 }
 
-/** 步骤 3：把服务端路由移出 staging。 */
+/** 步骤 3：把服务端路由移出 staging（落到 .build/_disabled，类型检查范围之外）。 */
 function pruneServerRoutes() {
   console.log("[3/6] 移出服务端路由…")
-  const disabled = join(staging, "_disabled")
+  const disabled = join(root, ".build", "_disabled")
+  rmSync(disabled, { recursive: true, force: true })
   const moved = []
   for (const route of SERVER_ROUTES) {
     const from = join(staging, "app", route)
