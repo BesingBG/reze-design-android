@@ -386,6 +386,11 @@ class MainActivity : Activity() {
             // 音频/动作播放不应被手势限制拦住
             mediaPlaybackRequiresUserGesture = false
 
+            // 用户在 AI 连接里填的内网服务多是 http（如 http://192.168.x.x:8080/v1），
+            // 而壳页面是 https://appassets…。默认 NEVER_ALLOW 会把这类请求当混合内容拦下；
+            // 壳的唯一 http 出口就是用户自己填的 AI 端点，放开没有额外暴露面。
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
             cacheMode = WebSettings.LOAD_DEFAULT
         }
 
