@@ -106,7 +106,7 @@ gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore
 
 > ⚠️ `reze-release.jks` 与里面的口令**必须一起备份**：keystore 决定 App 的身份，丢了就再也无法覆盖升级已安装的包。
 
-流水线不响应 push 与 tag。每天定时（**Auto Build on Upstream Update**，UTC 08:08 / 北京 16:08）会对比上游最新提交与最新 Release，**有新提交才**自动出包并发 Pre-release，也可以手动触发。
+流水线不响应 push 与 tag。**Auto Build on Upstream Update** 仅在仓库 Actions 页手动触发时才对比上游最新提交与最新 Release，有新提交才出包并发 Pre-release。
 
 ## 目录结构
 

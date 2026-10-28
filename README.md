@@ -106,7 +106,7 @@ gh secret set KEYSTORE_PROPERTIES --repo BesingBG/reze-design-android < keystore
 
 > ⚠️ `reze-release.jks` and its passwords **must be backed up together**: the keystore is the app's identity, and losing it means never being able to upgrade an installed copy in place.
 
-Builds do not run on push or tag. A daily scheduled workflow — **Auto Build on Upstream Update** (08:08 UTC / 16:08 Beijing) — compares upstream's latest commit against the latest release and automatically builds and publishes a new APK only when something changed; it can also be triggered manually.
+Builds do not run on push or tag. **Auto Build on Upstream Update** builds and publishes a new APK only when triggered manually from the repository Actions page.
 
 ## Project structure
 

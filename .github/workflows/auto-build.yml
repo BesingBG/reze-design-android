@@ -7,8 +7,8 @@ name: Auto Build on Upstream Update
 # 本文件只做检查与调度，构建逻辑全部在 build-apk.yml / scripts/ 里（secrets: inherit 透传签名密钥）。
 
 on:
-  schedule:
-    - cron: "8 8 * * *"
+  # schedule:
+  #   - cron: "8 8 * * *"
   workflow_dispatch:
 
 permissions:
